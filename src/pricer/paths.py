@@ -222,4 +222,7 @@ def gbm_paths(
         (np.zeros((n_paths, 1), dtype=np.float64), np.cumsum(log_increments, axis=1)),
         axis=1,
     )
-    return market.spot * np.exp(log_relative)
+    # asarray rather than a bare product: multiplying a Python float by an ndarray
+    # is typed as Any under some NumPy stub versions, which would silently widen
+    # this function's return type. It is a no-op at runtime for a float64 array.
+    return np.asarray(market.spot * np.exp(log_relative), dtype=np.float64)
