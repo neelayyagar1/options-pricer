@@ -1,0 +1,106 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "options-pricer"
+version = "0.1.0"
+description = "Options pricing engine: Black-Scholes closed form, Monte Carlo with variance reduction, and empirical volatility analysis"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Neel Yagari" }]
+keywords = ["options", "black-scholes", "monte-carlo", "derivatives", "quantitative-finance"]
+classifiers = [
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.14",
+]
+
+[project.optional-dependencies]
+data = [
+    "pandas>=2.2",
+    "yfinance>=0.2.50",
+]
+plot = [
+    "matplotlib>=3.9",
+]
+dev = [
+    "options-pricer[data,plot]",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "mypy>=1.11",
+    "ruff>=0.6",
+    "pandas-stubs",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pricer = ["py.typed"]
+
+# --------------------------------------------------------------------------- #
+# Tooling
+# --------------------------------------------------------------------------- #
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+markers = [
+    "slow: tests that run large path counts (deselect with '-m \"not slow\"')",
+    "network: tests that require live market data",
+]
+filterwarnings = ["error::RuntimeWarning"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # flake8-bugbear
+    "A",         # flake8-builtins
+    "C4",        # comprehensions
+    "SIM",       # flake8-simplify
+    "RUF",       # ruff-specific
+    "NPY",       # numpy-specific
+    "D",         # pydocstyle
+]
+ignore = [
+    "D105",  # magic methods need no docstring
+    "D107",  # __init__ documented at class level
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+# Test classes group related assertions; the class docstring states the property
+# under test, so per-method docstrings would only restate the method name.
+"tests/*" = ["D101", "D102", "D103"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["yfinance.*", "scipy.*", "matplotlib.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["pricer"]
+branch = true
