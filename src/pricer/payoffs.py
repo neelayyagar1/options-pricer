@@ -1,19 +1,7 @@
-r"""Payoff functions: pure maps from simulated paths to terminal cashflows.
+r"""Payoffs: functions from simulated paths to undiscounted cashflows.
 
-A payoff receives an array of shape ``(n_paths, n_steps + 1)`` and returns one
-undiscounted cashflow per path. Nothing here knows how the paths were produced, and
-nothing in :mod:`pricer.paths` knows what will be done with them. That separation is
-the reason an Asian or barrier option costs a few lines rather than a new pricer.
-
-Path dependence
----------------
-Each payoff declares whether it actually looks at the interior of the path. A
-European vanilla does not — it needs only :math:`S_T` — so the engine may simulate
-it with a single exact step, which is both faster and free of any discretisation
-question. A payoff that *is* path dependent forces the engine to respect the caller's
-step count, because for those contracts the step count is not a numerical
-convenience but part of the contract's definition (where the average is sampled,
-where the barrier is monitored).
+Paths come in as (n_paths, n_steps + 1). A payoff knows nothing about how the paths
+were made, which is why adding a new contract is only a few lines.
 """
 
 from __future__ import annotations
@@ -36,7 +24,7 @@ class Payoff(Protocol):
     """Structural type for a terminal cashflow function.
 
     Declared as a read-only property rather than a mutable attribute so that
-    frozen dataclasses — which is what every payoff in this package is — satisfy
+    frozen dataclasses, which is what every payoff in this package is, satisfy
     the protocol.
     """
 
