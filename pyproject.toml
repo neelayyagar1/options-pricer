@@ -20,12 +20,14 @@ classifiers = [
 dependencies = [
     "numpy>=2.0",
     "scipy>=1.14",
+    "scikit-learn>=1.5",
 ]
 
 [project.optional-dependencies]
 data = [
     "pandas>=2.2",
     "yfinance>=0.2.50",
+    "statsmodels>=0.14",
 ]
 plot = [
     "matplotlib>=3.9",
@@ -98,7 +100,7 @@ warn_unreachable = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["yfinance.*", "scipy.*", "matplotlib.*"]
+module = ["yfinance.*", "scipy.*", "matplotlib.*", "sklearn.*", "statsmodels.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
