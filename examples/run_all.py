@@ -25,6 +25,7 @@ from pricer.convergence import measure_convergence
 from pricer.data.loader import SNAPSHOT_DIR, load_chain
 from pricer.forward import implied_forward
 from pricer.greeks import fd_greeks, pathwise_greeks
+from pricer.hedging import simulate_delta_hedge
 from pricer.implied_vol import otm_smile
 from pricer.instruments import EuropeanOption, OptionType
 from pricer.market import MarketParams
@@ -269,6 +270,62 @@ def smile() -> None:
     plt.close(fig)
 
 
+def hedging() -> None:
+    spot, strike, maturity, rate = 100.0, 100.0, 0.5, 0.04
+    implied, realized = 0.25, 0.15
+    option = EuropeanOption(strike, maturity, OptionType.CALL)
+    common = {"rate": rate, "implied_vol": implied, "realized_vol": realized}
+    at_implied = simulate_delta_hedge(
+        spot, option, hedge_vol=implied, n_rebalances=126, n_paths=20_000, seed=1, **common
+    )
+    at_realized = simulate_delta_hedge(
+        spot, option, hedge_vol=realized, n_rebalances=126, n_paths=20_000, seed=1, **common
+    )
+    gap = (
+        float(bs.price(spot, strike, maturity, rate, implied, OptionType.CALL))
+        - float(bs.price(spot, strike, maturity, rate, realized, OptionType.CALL))
+    ) * math.exp(rate * maturity)
+    tables.append(
+        "### Delta hedging a short ATM call\n\n"
+        "Sold at 25% vol, stock realizes 15%, 126 rebalances, 20k paths.\n\n"
+        "| Hedge volatility | Mean P&L | Std of P&L |\n|---|---|---|\n"
+        f"| Implied (25%) | {at_implied.mean:.3f} | {at_implied.std:.3f} |\n"
+        f"| Realized (15%) | {at_realized.mean:.3f} | {at_realized.std:.3f} |\n\n"
+        f"Deterministic limit when hedging at realized vol: {gap:.3f}\n"
+    )
+
+    counts = [4, 8, 16, 32, 64, 128, 256, 512]
+    stds = [
+        simulate_delta_hedge(
+            spot,
+            option,
+            rate=rate,
+            implied_vol=0.2,
+            realized_vol=0.2,
+            n_rebalances=n,
+            n_paths=40_000,
+            seed=2,
+        ).std
+        for n in counts
+    ]
+    slope = float(np.polyfit(np.log(counts), np.log(stds), 1)[0])
+
+    fig, (a, b) = plt.subplots(1, 2, figsize=(11, 4))
+    bins = np.linspace(-1.0, 6.0, 80)
+    a.hist(at_implied.pnl, bins=bins, alpha=0.6, label="hedged at implied vol (random P&L)")
+    a.hist(at_realized.pnl, bins=bins, alpha=0.6, label="hedged at realized vol (nearly fixed)")
+    a.axvline(gap, color="k", ls="--", lw=0.9)
+    a.set(xlabel="P&L at expiry", ylabel="paths", title="Same stock paths, two hedges")
+    a.legend(fontsize=8)
+    b.loglog(counts, stds, "o-", label=f"measured, slope {slope:.2f}")
+    b.loglog(counts, stds[0] * (np.array(counts) / counts[0]) ** -0.5, "k--", label="n^(-1/2)")
+    b.set(xlabel="rebalances", ylabel="std of hedging error", title="Hedging error vs frequency")
+    b.legend()
+    fig.tight_layout()
+    fig.savefig(FIGURES / "hedging.png")
+    plt.close(fig)
+
+
 def american() -> None:
     lines = [
         "### American put, S=100, sigma=30%, r=5%, T=1 (LSM, 200k paths, 50 dates)\n",
@@ -290,7 +347,7 @@ def american() -> None:
 
 if __name__ == "__main__":
     FIGURES.mkdir(exist_ok=True)
-    for step in (convergence, variance_reduction, barrier, greeks, american, smile):
+    for step in (convergence, variance_reduction, barrier, greeks, american, smile, hedging):
         print("running", step.__name__)
         step()
     (ROOT / "results.md").write_text("\n".join(tables))
