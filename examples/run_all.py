@@ -22,12 +22,16 @@ from pricer.american import price_american_lsm
 from pricer.analytic import geometric_asian_price
 from pricer.binomial import binomial_price
 from pricer.convergence import measure_convergence
+from pricer.data.loader import SNAPSHOT_DIR, load_chain
+from pricer.forward import implied_forward
 from pricer.greeks import fd_greeks, pathwise_greeks
+from pricer.implied_vol import otm_smile
 from pricer.instruments import EuropeanOption, OptionType
 from pricer.market import MarketParams
 from pricer.monte_carlo import simulate_european, simulate_price
 from pricer.paths import RandomSource
 from pricer.payoffs import AsianKind, AsianPayoff, BarrierPayoff, BarrierStyle
+from pricer.surface import butterfly_g, calendar_violations, fit_svi, svi_total_variance
 from pricer.variance_reduction import simulate_control_variate
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -208,6 +212,63 @@ def greeks() -> None:
     plt.close(fig)
 
 
+def smile() -> None:
+    chain = load_chain(sorted(SNAPSHOT_DIR.glob("spy_*.json"))[-1])
+    slices, data = [], {}
+    for expiry in chain.expiries:
+        if expiry.maturity < 0.04:
+            continue
+        fwd = implied_forward(expiry, chain.spot, rate=chain.rate)
+        k, vols = otm_smile(expiry, fwd)
+        if k.size < 15:
+            continue
+        slices.append(fit_svi(k, vols, expiry.maturity))
+        data[expiry.maturity] = (expiry.expiry, k, vols)
+
+    lines = [
+        f"### SVI fits, {chain.ticker} on {chain.asof} (spot {chain.spot:.2f})\n",
+        "| Expiry | T (years) | Points | Fit RMSE (vol pts) | Min g(k) | "
+        "Vol at k=-0.10 minus vol at k=+0.10 (pts) |",
+        "|---|---|---|---|---|---|",
+    ]
+    for sl in slices:
+        expiry_date, k, _ = data[sl.maturity]
+        grid = np.linspace(k.min(), k.max(), 200)
+        g_min = butterfly_g(grid, sl.params).min()
+        skew = np.sqrt(svi_total_variance(np.array([-0.10, 0.10]), sl.params) / sl.maturity)
+        lines.append(
+            f"| {expiry_date} | {sl.maturity:.3f} | {sl.n_points} | {100 * sl.rmse_vol:.2f} | "
+            f"{g_min:.3f} | {100 * (skew[0] - skew[1]):.1f} |"
+        )
+    violations = calendar_violations(slices, np.linspace(-0.15, 0.15, 61))
+    lines.append(f"\nCalendar arbitrage violations between adjacent slices: {len(violations)}\n")
+    tables.append("\n".join(lines))
+
+    picks = [slices[i] for i in (0, len(slices) // 2, len(slices) - 1)]
+    fig, (a, b) = plt.subplots(1, 2, figsize=(11, 4))
+    for sl in picks:
+        expiry_date, k, vols = data[sl.maturity]
+        grid = np.linspace(k.min(), k.max(), 200)
+        line = a.plot(
+            grid,
+            100 * np.sqrt(svi_total_variance(grid, sl.params) / sl.maturity),
+            label=f"{expiry_date} (T={sl.maturity:.2f})",
+        )[0]
+        a.plot(k, 100 * vols, ".", ms=3, alpha=0.5, color=line.get_color())
+        b.plot(grid, butterfly_g(grid, sl.params), color=line.get_color())
+    a.set(
+        xlabel="log-moneyness ln(K/F)",
+        ylabel="implied vol (%)",
+        title="SPY smile, OTM mids and SVI fit",
+    )
+    a.legend()
+    b.axhline(0.0, color="k", lw=0.8)
+    b.set(xlabel="log-moneyness ln(K/F)", ylabel="g(k)", title="Butterfly condition (g >= 0)")
+    fig.tight_layout()
+    fig.savefig(FIGURES / "smile.png")
+    plt.close(fig)
+
+
 def american() -> None:
     lines = [
         "### American put, S=100, sigma=30%, r=5%, T=1 (LSM, 200k paths, 50 dates)\n",
@@ -229,7 +290,7 @@ def american() -> None:
 
 if __name__ == "__main__":
     FIGURES.mkdir(exist_ok=True)
-    for step in (convergence, variance_reduction, barrier, greeks, american):
+    for step in (convergence, variance_reduction, barrier, greeks, american, smile):
         print("running", step.__name__)
         step()
     (ROOT / "results.md").write_text("\n".join(tables))
