@@ -22,7 +22,9 @@ from pricer.american import price_american_lsm
 from pricer.analytic import geometric_asian_price
 from pricer.binomial import binomial_price
 from pricer.convergence import measure_convergence
+from pricer.data.history import load_history
 from pricer.data.loader import SNAPSHOT_DIR, load_chain
+from pricer.forecast import build_features, qlike, walk_forward_forecast
 from pricer.forward import implied_forward
 from pricer.greeks import fd_greeks, pathwise_greeks
 from pricer.hedging import simulate_delta_hedge
@@ -34,6 +36,7 @@ from pricer.paths import RandomSource
 from pricer.payoffs import AsianKind, AsianPayoff, BarrierPayoff, BarrierStyle
 from pricer.surface import butterfly_g, calendar_violations, fit_svi, svi_total_variance
 from pricer.variance_reduction import simulate_control_variate
+from pricer.vrp import premium_frame, summarize_premium
 
 ROOT = Path(__file__).resolve().parent.parent
 FIGURES = ROOT / "figures"
@@ -326,6 +329,90 @@ def hedging() -> None:
     plt.close(fig)
 
 
+def vrp() -> None:
+    history = load_history()
+    frame = premium_frame(history)
+    span = f"{frame.index[0].date()} to {frame.index[-1].date()}"
+    lines = [
+        f"### Variance risk premium, VIX vs realized S&P 500 vol ({span})\n",
+        "Realized vol is measured over the 21 trading days after each date.\n",
+        "| Measure | Mean | Newey-West t | Non-overlapping t | Share of days positive |",
+        "|---|---|---|---|---|",
+    ]
+    for label, column, scale in (
+        ("Volatility premium (VIX - RV, vol points)", "vol_premium", 100.0),
+        ("Variance premium (VIX^2 - RV^2, vol points squared)", "variance_premium", 10_000.0),
+    ):
+        r = summarize_premium(frame[column])
+        lines.append(
+            f"| {label} | {scale * r.mean:.2f} | {r.newey_west_t:.1f} | "
+            f"{r.nonoverlapping_t:.1f} (n={r.n_nonoverlapping}) | {r.fraction_positive:.0%} |"
+        )
+    worst = frame["vol_premium"].idxmin()
+    lines.append(
+        f"\nMean VIX {100 * frame['iv'].mean():.1f}, mean realized {100 * frame['rv'].mean():.1f}. "
+        f"Date with the most negative premium (a seller's worst case): {worst.date()} "
+        f"({100 * frame['vol_premium'].min():.1f} vol points).\n"
+    )
+    tables.append("\n".join(lines))
+
+    features = build_features(history, frame["rv"])
+    har = ["lrv1", "lrv5", "lrv22"]
+    forecasts = {
+        "VIX as the forecast": features["lvix"],
+        "HAR (ridge)": walk_forward_forecast(features, har),
+        "HAR + VIX (ridge)": walk_forward_forecast(features, [*har, "lvix"]),
+    }
+    mask = forecasts["HAR (ridge)"].notna()
+    truth = features["target"][mask]
+    rows = [
+        "### Walk-forward forecast of 21-day realized vol\n",
+        f"Out of sample {features.index[mask][0].date()} to {features.index[mask][-1].date()}, "
+        "scikit-learn ridge with an expanding window and a 21 day gap between train and test.\n",
+        "| Forecast | RMSE of log vol | QLIKE | Mean log error |",
+        "|---|---|---|---|",
+    ]
+    for name, pred in forecasts.items():
+        p = pred[mask]
+        rows.append(
+            f"| {name} | {np.sqrt(np.mean((p - truth) ** 2)):.3f} | "
+            f"{qlike(np.exp(p), np.exp(truth)):.3f} | {np.mean(p - truth):+.3f} |"
+        )
+    tables.append("\n".join(rows) + "\n")
+
+    gap = (features["lvix"] - forecasts["HAR + VIX (ridge)"])[mask]
+    frame_gap = gap.to_frame("gap").join(frame["vol_premium"]).dropna()
+    frame_gap["bucket"] = np.asarray(
+        1 + np.digitize(frame_gap["gap"], np.quantile(frame_gap["gap"], [0.2, 0.4, 0.6, 0.8]))
+    )
+    buckets = frame_gap.groupby("bucket")["vol_premium"].agg(["mean", "count"])
+    corr = frame_gap["gap"].corr(frame_gap["vol_premium"])
+    out = [
+        "### Does the gap between the VIX and the model forecast predict the premium?\n",
+        "| Gap quintile (1 = smallest) | Days | Mean realized vol premium (vol pts) |",
+        "|---|---|---|",
+    ]
+    out += [f"| {b} | {int(r['count'])} | {100 * r['mean']:.2f} |" for b, r in buckets.iterrows()]
+    out.append(f"\nCorrelation between the gap and the realized premium: {corr:.3f}.\n")
+    tables.append("\n".join(out))
+
+    fig, (a, b) = plt.subplots(1, 2, figsize=(11, 4))
+    a.plot(frame.index, 100 * frame["iv"], lw=0.7, label="VIX")
+    a.plot(frame.index, 100 * frame["rv"], lw=0.7, label="realized vol, next 21 days")
+    a.set(ylabel="annualized vol (%)", title="Implied vs subsequently realized")
+    a.legend(fontsize=8)
+    b.hist(100 * frame["vol_premium"], bins=80)
+    b.axvline(100 * frame["vol_premium"].mean(), color="k", ls="--", lw=0.9)
+    b.set(
+        xlabel="VIX minus realized (vol points)",
+        ylabel="days",
+        title="The premium is usually positive, with a fat left tail",
+    )
+    fig.tight_layout()
+    fig.savefig(FIGURES / "vrp.png")
+    plt.close(fig)
+
+
 def american() -> None:
     lines = [
         "### American put, S=100, sigma=30%, r=5%, T=1 (LSM, 200k paths, 50 dates)\n",
@@ -347,7 +434,7 @@ def american() -> None:
 
 if __name__ == "__main__":
     FIGURES.mkdir(exist_ok=True)
-    for step in (convergence, variance_reduction, barrier, greeks, american, smile, hedging):
+    for step in (convergence, variance_reduction, barrier, greeks, american, smile, hedging, vrp):
         print("running", step.__name__)
         step()
     (ROOT / "results.md").write_text("\n".join(tables))
