@@ -437,5 +437,14 @@ if __name__ == "__main__":
     for step in (convergence, variance_reduction, barrier, greeks, american, smile, hedging, vrp):
         print("running", step.__name__)
         step()
-    (ROOT / "results.md").write_text("\n".join(tables))
-    print("wrote results.md and figures/")
+    body = "\n".join(tables)
+    (ROOT / "results.md").write_text(body)
+    readme = ROOT / "README.md"
+    text = readme.read_text()
+    start, end = "<!-- results:start -->", "<!-- results:end -->"
+    if start in text and end in text:
+        head, rest = text.split(start, 1)
+        _, tail = rest.split(end, 1)
+        demoted = body.replace("### ", "#### ")
+        readme.write_text(f"{head}{start}\n\n{demoted}\n{end}{tail}")
+    print("wrote results.md, figures/ and the README results block")
