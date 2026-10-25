@@ -112,3 +112,36 @@ class TestBarrier:
         barrier = simulate_price(MARKET, T, payoff, n_paths=50_000, seed=8, n_steps=20)
         plain = simulate_price(MARKET, T, vanilla, n_paths=50_000, seed=8, n_steps=20)
         assert barrier.price == pytest.approx(plain.price, rel=1e-6)
+
+
+class TestBridgeAgainstBGK:
+    def test_bridge_matches_barrier_shift_at_fine_grids(self) -> None:
+        """Grid barrier shifted by the BGK factor should match the bridge price.
+
+        A grid-monitored barrier B*exp(-0.5826*sigma*sqrt(dt)) approximates the
+        continuously monitored one at B. It is first order in dt, so it only holds
+        tightly on a fine grid.
+        """
+        steps = 400
+        shift = math.exp(-0.5826 * MARKET.volatility * math.sqrt(T / steps))
+        shifted = BarrierPayoff(
+            100.0,
+            130.0 * shift,
+            OptionType.CALL,
+            BarrierStyle.UP_AND_OUT,
+            MARKET.volatility,
+            T,
+            bridge=False,
+        )
+        bridged = BarrierPayoff(
+            100.0,
+            130.0,
+            OptionType.CALL,
+            BarrierStyle.UP_AND_OUT,
+            MARKET.volatility,
+            T,
+            bridge=True,
+        )
+        a = simulate_price(MARKET, T, shifted, n_paths=400_000, seed=13, n_steps=steps)
+        b = simulate_price(MARKET, T, bridged, n_paths=400_000, seed=13, n_steps=steps)
+        assert abs(a.price - b.price) < 0.03

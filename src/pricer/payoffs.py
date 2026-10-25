@@ -102,7 +102,8 @@ class AsianPayoff:
             average = np.mean(monitored, axis=1)
         else:
             average = np.exp(np.mean(np.log(monitored), axis=1))
-        return np.maximum(self.option_type.sign * (average - self.strike), 0.0)
+        payoff = np.maximum(self.option_type.sign * (average - self.strike), 0.0)
+        return np.asarray(payoff, dtype=np.float64)
 
 
 class BarrierStyle(StrEnum):

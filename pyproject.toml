@@ -92,6 +92,7 @@ convention = "numpy"
 # Test classes group related assertions; the class docstring states the property
 # under test, so per-method docstrings would only restate the method name.
 "tests/*" = ["D101", "D102", "D103"]
+"examples/*" = ["D103"]
 
 [tool.mypy]
 python_version = "3.12"
