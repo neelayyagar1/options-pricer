@@ -1,31 +1,8 @@
-r"""The Monte Carlo pricing engine.
+r"""Monte Carlo pricing engine.
 
-Risk-neutral valuation says the price of a claim is the discounted expectation of
-its payoff under a particular measure. Monte Carlo takes that literally: simulate
-the risk-neutral world many times, average the payoff, discount. The law of large
-numbers does the rest.
-
-What it costs is speed of convergence. The error of an average of :math:`N`
-independent samples falls as :math:`O(N^{-1/2})`, so buying one more decimal place
-of accuracy costs a hundred times the compute. That single fact is why the variance
-reduction in :mod:`pricer.estimators` is not an optimisation but a necessity, and
-why every result carries an error bar.
-
-Memory
-------
-A naive one-million-path, 252-step simulation allocates roughly two gigabytes.
-Simulation is therefore chunked: paths are generated, converted to payoffs, and
-folded into running moments a block at a time, so peak memory is bounded by the
-chunk rather than by the run. The chunk size is derived deterministically from the
-step count so that results stay reproducible.
-
-Reproducibility contract
-------------------------
-A run is reproducible given the same ``seed``, ``n_paths``, ``n_steps`` and
-``max_elements``. Chunk boundaries influence which draws land on which path, so
-changing the memory budget changes the sample — not its distribution, and not the
-price beyond Monte Carlo error, but the exact digits. The defaults are fixed
-constants precisely so the default path is bit-for-bit repeatable.
+Simulate the risk-neutral world, average the discounted payoff. Paths are generated
+in chunks so memory stays bounded, and the chunk size is fixed so runs reproduce
+for a given seed.
 """
 
 from __future__ import annotations
@@ -116,7 +93,7 @@ def simulate_price(
     Raises
     ------
     ValueError
-        If the arguments are inconsistent — an odd path count under antithetic
+        If the arguments are inconsistent, an odd path count under antithetic
         sampling, a path-dependent payoff with no step count, or a combination
         Sobol cannot support.
     """
@@ -256,7 +233,7 @@ def simulate_european(
     A convenience wrapper over :func:`simulate_price`. Because the payoff depends
     only on :math:`S_T`, the simulation uses a single exact step and therefore
     differs from the closed form of :mod:`pricer.black_scholes` by Monte Carlo error
-    alone — which is what makes the convergence study a genuine correctness proof
+    alone, which is what makes the convergence study a genuine correctness proof
     rather than a plausibility check.
     """
     return simulate_price(

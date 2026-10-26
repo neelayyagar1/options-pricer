@@ -1,22 +1,7 @@
-r"""Measuring the convergence *rate*, not just the converged value.
+r"""Measure the MC convergence rate.
 
-Agreeing with a closed form at one path count shows a pricer is not badly broken.
-It does not show that the estimator is behaving the way the theory says it should.
-The stronger statement — the one this module produces — is that the error decays at
-the predicted rate:
-
-.. math:: \text{RMSE}(N) \approx C N^{-1/2}
-   \quad\Longleftrightarrow\quad
-   \log \text{RMSE} = \log C - \tfrac{1}{2}\log N
-
-so a regression of log error on log path count must have slope :math:`-1/2`.
-
-One methodological point makes this valid rather than decorative. The error of a
-*single* seed at a given :math:`N` is itself a random variable: it can be near zero
-by luck. Regressing single-seed errors produces a slope with no meaning. The error
-must first be averaged over independent replications into a root-mean-square error,
-and only then regressed. That is why :func:`measure_convergence` takes a
-replication count and why it is not optional.
+RMSE is averaged over independent replications at each N, then log RMSE is
+regressed on log N. A single seed gives a slope that means nothing.
 """
 
 from __future__ import annotations

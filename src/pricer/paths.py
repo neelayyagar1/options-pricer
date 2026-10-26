@@ -1,34 +1,8 @@
-r"""Simulation of the underlying under the risk-neutral measure.
+r"""Path simulation under risk-neutral GBM.
 
-Two ideas structure this module, and both matter more than they first appear.
-
-**Drawing normals is separated from turning them into paths.** Every technique the
-project relies on later — common random numbers for bumped Greeks, antithetic
-variates, quasi-Monte Carlo — is a statement about *which normals to draw*, not
-about the price process. Keeping the two apart means each composes with the others
-instead of requiring its own bespoke simulator.
-
-**Stepping is exact, not an Euler discretisation.** Under geometric Brownian motion
-the log-price increment is exactly normal, so the transition can be sampled in
-closed form:
-
-.. math::
-
-    S_{t+\Delta t} = S_t \exp\!\left[\left(r - q - \tfrac{1}{2}\sigma^2\right)
-    \Delta t + \sigma\sqrt{\Delta t}\,Z\right]
-
-There is therefore **no discretisation bias in the marginal distribution** of the
-simulated price, at any step count. An Euler scheme would carry one. This matters
-for interpreting the convergence study: every residual error is Monte Carlo noise
-or a path-dependent *feature* being sampled discretely (where a barrier is
-monitored, where an average is taken) — never the price process itself.
-
-Reproducibility
----------------
-Functions take a *seed*, not a live :class:`numpy.random.Generator`. Rebuilding the
-generator from a seed is what makes common random numbers trivial: price twice with
-the same seed and the two runs consume identical draws, so a finite-difference bump
-measures the bump rather than the noise.
+Steps are sampled exactly from the lognormal transition (no Euler bias). Drawing
+normals is kept separate from building paths so antithetic draws, common random
+numbers and Sobol all plug in the same way.
 """
 
 from __future__ import annotations
@@ -75,7 +49,7 @@ class RandomSource(StrEnum):
     SOBOL
         A scrambled Sobol low-discrepancy sequence. Fills the unit cube far more
         evenly than random draws, buying error decay closer to :math:`O(N^{-1})`
-        instead of :math:`O(N^{-1/2})` — but the points are *not* independent, so
+        instead of :math:`O(N^{-1/2})`, but the points are *not* independent, so
         the usual standard-error formula does not apply. Used only as a benchmark
         arm in the one-dimensional convergence study.
     """
@@ -117,7 +91,7 @@ def antithetic_normals(n_pairs: int, n_steps: int, seed: SeedLike) -> FloatArray
     -----
     Antithetic sampling reduces variance only when
     :math:`\operatorname{Cov}(f(Z), f(-Z)) < 0`, which holds when the payoff is
-    monotone in :math:`Z` — true for vanilla calls and puts. For payoffs that are
+    monotone in :math:`Z`, true for vanilla calls and puts. For payoffs that are
     symmetric about the forward, such as a straddle, the covariance can be positive
     and the technique *increases* variance. It is not free, and this package
     measures rather than assumes its benefit.
@@ -132,7 +106,7 @@ def sobol_normals(n_paths: int, n_steps: int, seed: SeedLike) -> FloatArray:
     Parameters
     ----------
     n_paths
-        Number of points. Must be a power of two — Sobol's equidistribution
+        Number of points. Must be a power of two, Sobol's equidistribution
         properties hold on balanced blocks of :math:`2^m` points, and taking an
         arbitrary prefix degrades the uniformity that motivates using it at all.
     n_steps
@@ -148,8 +122,8 @@ def sobol_normals(n_paths: int, n_steps: int, seed: SeedLike) -> FloatArray:
     Notes
     -----
     The convergence advantage of QMC degrades with **effective dimension**. For a
-    one-dimensional problem — a European payoff, which needs only the terminal
-    price — the improvement is large and clearly visible. Applied naively to a
+    one-dimensional problem, a European payoff, which needs only the terminal
+    price, the improvement is large and clearly visible. Applied naively to a
     252-step path it is largely lost, because the later coordinates of a Sobol
     sequence are much less well distributed than the first few. Recovering the
     benefit there requires a Brownian-bridge or PCA path construction that

@@ -1,43 +1,9 @@
-r"""Black-Scholes-Merton closed-form prices and analytic Greeks.
+r"""Black-Scholes-Merton prices and analytic Greeks.
 
-Everything here is exact: no discretisation, no simulation. That is the point —
-this module is the ground truth against which the Monte Carlo engine in
-:mod:`pricer.monte_carlo` is validated, so any error here would silently
-invalidate the correctness proof that the rest of the project rests on.
-
-The model
----------
-Under the risk-neutral measure the underlying follows
-
-.. math:: dS_t = (r - q) S_t\,dt + \sigma S_t\,dW_t
-
-and the value of a European option with :math:`\phi = +1` for a call and
-:math:`\phi = -1` for a put is
-
-.. math::
-
-    V = \phi\left[S e^{-qT} N(\phi d_1) - K e^{-rT} N(\phi d_2)\right],
-    \qquad
-    d_{1,2} = \frac{\ln(S/K) + (r - q \pm \tfrac{1}{2}\sigma^2)T}{\sigma\sqrt{T}}
-
-Notice what is *absent*: the real-world drift :math:`\mu`. The hedging argument
-removes risk preferences from the problem entirely, which is why the one parameter
-that would be hardest to estimate never has to be estimated.
-
-Conventions
------------
-All Greeks are returned in raw mathematical units — per unit of the underlying,
-per unit of volatility, per *year* of time. Trading desks quote vega per volatility
-*point* and theta per calendar *day*; :class:`Greeks` exposes both, because
-silently mixing the two conventions is a common and very visible error.
-
-Degenerate inputs
------------------
-When :math:`\sigma\sqrt{T} = 0` the option has no optionality left and the
-formulas above are ``0/0``. Rather than returning ``nan``, this module returns the
-correct limits (see :func:`price` and :func:`greeks`), which keeps the boundaries
-of a Greeks surface usable and makes the ``T -> 0`` and ``sigma -> 0`` unit tests
-meaningful rather than skipped.
+Closed form with a continuous dividend yield. This is the reference the Monte Carlo
+code is checked against. Greeks are in raw units (per year for theta, per 1.00 of vol
+for vega); the *_per_point / *_per_day properties give the desk conventions.
+When sigma*sqrt(T) is zero the exact limits are returned instead of nan.
 """
 
 from __future__ import annotations

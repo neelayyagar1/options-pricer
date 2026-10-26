@@ -1,10 +1,4 @@
-"""Contract specifications.
-
-Instruments are immutable value objects: they describe *what* is being priced and
-carry no pricing logic. Every model in this package accepts an instrument plus a
-:class:`~pricer.market.MarketParams`, so a new payoff never requires touching a
-pricing engine.
-"""
+r"""Contract specs. No pricing logic lives here."""
 
 from __future__ import annotations
 
@@ -22,7 +16,7 @@ class OptionType(StrEnum):
 
     .. math:: V = \phi\left[S e^{-qT} N(\phi d_1) - K e^{-rT} N(\phi d_2)\right]
 
-    Beyond brevity this matters for vectorisation — branching on option type inside
+    Beyond brevity this matters for vectorisation, branching on option type inside
     an array expression would force a Python-level loop.
     """
 

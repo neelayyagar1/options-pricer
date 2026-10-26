@@ -1,43 +1,8 @@
-r"""Monte Carlo estimators, and the error bars that make them trustworthy.
+r"""Monte Carlo result types and standard errors.
 
-This module exists because of one specific, common, credibility-destroying bug.
-
-A Monte Carlo price is worthless without an honest estimate of its own error, and
-the moment a variance-reduction technique is introduced the naive formula stops
-being correct. Under **antithetic sampling** the :math:`2N` simulated payoffs are
-not independent — each is the mirror of another. The estimator is the mean of
-:math:`N` **pair averages**
-
-.. math:: Y_i = \tfrac{1}{2}\left[f(Z_i) + f(-Z_i)\right]
-
-and those pair averages, not the raw payoffs, are the independent quantities whose
-spread measures the error.
-
-Why the naive formula is worse than merely wrong
-------------------------------------------------
-Writing :math:`\rho = \operatorname{Corr}(f(Z), f(-Z))` and
-:math:`\sigma_f^2 = \operatorname{Var} f(Z)`, the pair average has variance
-:math:`\tfrac{1}{2}\sigma_f^2(1 + \rho)`, so the estimator's true standard error is
-
-.. math:: \text{SE} = \sigma_f\sqrt{\frac{1+\rho}{2N}},
-   \qquad\text{while}\qquad
-   \text{SE}_{\text{naive}} = \frac{\sigma_f}{\sqrt{2N}}
-
-The naive figure is precisely the plain-Monte-Carlo error at :math:`2N` paths, and
-it does not depend on :math:`\rho` **at all**. It is therefore blind in both
-directions at once:
-
-- When antithetic sampling *works* (:math:`\rho < 0`) it overstates the error and
-  silently erases the very reduction the technique was introduced to achieve.
-- When antithetic sampling *backfires* (:math:`\rho > 0`, as it can for a payoff
-  symmetric about the forward such as a straddle) it understates the error and
-  gives no warning at all.
-
-A number that cannot distinguish a technique working from that same technique
-doing harm is not a conservative approximation; it is an absence of information
-dressed up as a measurement. Every price this package reports therefore travels
-with a standard error computed from genuinely independent samples, together with
-the count of those samples.
+With antithetic sampling the 2N payoffs are not independent, so the standard error
+has to come from the N pair averages. Using s/sqrt(2N) on the raw payoffs gives the
+wrong answer whether the technique helps or hurts.
 """
 
 from __future__ import annotations
@@ -92,7 +57,7 @@ class RunningMoments:
     Sums are accumulated **around a shift** taken from the first batch rather than
     around zero. The textbook one-pass formula
     :math:`\sum x^2 - (\sum x)^2 / n` subtracts two large and nearly equal numbers,
-    and loses relative precision in proportion to :math:`(\mu/\sigma)^2` — which is
+    and loses relative precision in proportion to :math:`(\mu/\sigma)^2`, which is
     exactly the deep-in-the-money regime where the payoff mean dwarfs its spread.
     Shifting by an approximate mean makes the subtraction well conditioned at no
     meaningful cost.

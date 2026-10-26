@@ -5,7 +5,7 @@ established here, in increasing order of strength:
 
 1. Simulated prices agree with Black-Scholes to within their own stated error.
 2. The error decays at the rate the theory predicts, measured rather than asserted.
-3. The stated error is itself correct — including under antithetic sampling, where
+3. The stated error is itself correct, including under antithetic sampling, where
    the naive formula is wrong.
 
 Claim 3 is the one most often skipped. Without it, claim 1 is unfalsifiable: an
@@ -229,7 +229,7 @@ class TestStandardErrorIsCorrect:
         A straddle pays |S_T - K|, so a large move in either direction pays well and
         the mirrored payoffs become positively correlated. The true error is then
         *larger* than plain Monte Carlo at the same path count, and the naive
-        formula — still reporting sigma_f / sqrt(2N) — understates it and raises no
+        formula, still reporting sigma_f / sqrt(2N), understates it and raises no
         flag. This is the dangerous direction, and it is why the package never uses
         the naive formula even though it looks conservative in the common case.
         """
@@ -357,7 +357,7 @@ class TestConvergenceRate:
     def test_sobol_converges_faster_in_one_dimension(self) -> None:
         """QMC should beat pseudo-random on a genuinely one-dimensional integral.
 
-        A European payoff needs only S_T, so the pricing problem is a 1-D integral —
+        A European payoff needs only S_T, so the pricing problem is a 1-D integral -
         the regime where Sobol's advantage is real. The claim being tested is
         deliberately the weak, defensible one: a measurably steeper slope, not a
         specific rate.

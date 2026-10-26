@@ -1,11 +1,4 @@
-"""Market state: the observable (or implied) inputs shared by every model.
-
-Separating market state from contract terms keeps the pricing functions honest —
-a model may only depend on what is in these two objects, which makes it obvious
-what would have to change to relax an assumption. ``volatility`` living here, as a
-single number rather than a function of strike and maturity, *is* the constant-
-volatility assumption of Black-Scholes made structurally visible.
-"""
+r"""Market inputs shared by every model."""
 
 from __future__ import annotations
 
@@ -34,7 +27,7 @@ class MarketParams:
     Notes
     -----
     ``rate`` and ``dividend_yield`` are *continuously compounded*. Quoted Treasury
-    yields are not, and neither is a discrete dividend stream — converting is the
+    yields are not, and neither is a discrete dividend stream, converting is the
     caller's responsibility. In practice this package prefers to imply both from
     put-call parity on a live option chain rather than source them separately;
     see :mod:`pricer.forward`.
