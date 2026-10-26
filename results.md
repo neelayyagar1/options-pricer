@@ -12,8 +12,8 @@
 | Vanilla call | plain | 8.9920 | 0.02167 | 1.0x | 1.0x |
 | Vanilla call | antithetic | 9.0041 | 0.01631 | 1.8x | 2.9x |
 | Arithmetic Asian call | plain | 5.1653 | 0.01211 | 1.0x | 1.0x |
-| Arithmetic Asian call | antithetic | 5.1568 | 0.00894 | 1.8x | 1.6x |
-| Arithmetic Asian call | control variate (geometric) | 5.1695 | 0.00032 | 1398.5x | 1229.4x |
+| Arithmetic Asian call | antithetic | 5.1568 | 0.00894 | 1.8x | 1.5x |
+| Arithmetic Asian call | control variate (geometric) | 5.1695 | 0.00032 | 1398.5x | 1261.6x |
 
 Pilot correlation between arithmetic and geometric Asian: 0.9996
 
@@ -69,7 +69,7 @@ Pilot correlation between arithmetic and geometric Asian: 0.9996
 | 2027-09-17 | 0.901 | 75 | 0.09 | 0.449 | 6.3 |
 | 2027-09-30 | 0.937 | 139 | 0.09 | 0.454 | 6.0 |
 
-Calendar arbitrage violations between adjacent slices: 0
+Calendar arbitrage violations between adjacent slices: 0. The skew column evaluates SVI at k = -0.10 and +0.10, which is extrapolation on the shortest expiries where the quotes do not reach that far.
 
 ### Delta hedging a short ATM call
 
@@ -90,6 +90,7 @@ Realized vol is measured over the 21 trading days after each date.
 |---|---|---|---|---|
 | Volatility premium (VIX - RV, vol points) | 3.47 | 8.7 | 7.5 (n=261) | 84% |
 | Variance premium (VIX^2 - RV^2, vol points squared) | 76.43 | 2.3 | 1.7 (n=261) | 84% |
+| Variance premium excluding Sep 2008 to Mar 2009 and Feb to Apr 2020 (208 days dropped) | 115.90 | 9.6 | 7.5 (n=251) | 85% |
 
 Mean VIX 19.1, mean realized 15.6. Date with the most negative premium (a seller's worst case): 2020-02-20 (-72.0 vol points).
 
@@ -114,3 +115,28 @@ Out of sample 2008-02-06 to 2026-09-24, scikit-learn ridge with an expanding win
 | 5 | 938 | 2.98 |
 
 Correlation between the gap and the realized premium: -0.058.
+
+### Heston fitted to the SPY smile (2026-10-23)
+
+| v0 | kappa | theta | xi | rho | Feller ratio |
+|---|---|---|---|---|---|
+| 0.0282 | 7.29 | 0.0439 | 1.72 | -0.72 | 0.22 |
+
+| Expiry | Fit RMSE (vol pts) |
+|---|---|
+| 2026-11-13 | 0.76 |
+| 2026-12-04 | 0.61 |
+| 2026-12-31 | 0.45 |
+| 2027-02-26 | 0.33 |
+| 2027-06-17 | 0.21 |
+
+### Hedging a 3 month ATM call in the fitted Heston world
+
+63 rebalances, 4,000 paths. The call is sold at its Heston price.
+
+| Hedge | Mean P&L | Std of P&L | Std relative to flat Black-Scholes |
+|---|---|---|---|
+| Black-Scholes delta, vol fixed at the call's implied vol | -0.000 | 1.727 | 1.00 |
+| Black-Scholes delta at the current instantaneous vol | +0.021 | 1.835 | 1.06 |
+| Heston delta (derivative at fixed variance) | +0.002 | 2.070 | 1.20 |
+| Heston minimum-variance delta | -0.001 | 1.434 | 0.83 |
