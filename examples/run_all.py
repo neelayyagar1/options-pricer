@@ -27,7 +27,8 @@ from pricer.data.loader import SNAPSHOT_DIR, load_chain
 from pricer.forecast import build_features, qlike, walk_forward_forecast
 from pricer.forward import implied_forward
 from pricer.greeks import fd_greeks, pathwise_greeks
-from pricer.hedging import simulate_delta_hedge
+from pricer.hedging import hedge_under_heston, simulate_delta_hedge
+from pricer.heston import calibrate_heston, heston_implied_vols
 from pricer.implied_vol import otm_smile
 from pricer.instruments import EuropeanOption, OptionType
 from pricer.market import MarketParams
@@ -245,7 +246,11 @@ def smile() -> None:
             f"{g_min:.3f} | {100 * (skew[0] - skew[1]):.1f} |"
         )
     violations = calendar_violations(slices, np.linspace(-0.15, 0.15, 61))
-    lines.append(f"\nCalendar arbitrage violations between adjacent slices: {len(violations)}\n")
+    lines.append(
+        f"\nCalendar arbitrage violations between adjacent slices: {len(violations)}. "
+        "The skew column evaluates SVI at k = -0.10 and +0.10, which is extrapolation on the "
+        "shortest expiries where the quotes do not reach that far.\n"
+    )
     tables.append("\n".join(lines))
 
     picks = [slices[i] for i in (0, len(slices) // 2, len(slices) - 1)]
@@ -348,6 +353,16 @@ def vrp() -> None:
             f"| {label} | {scale * r.mean:.2f} | {r.newey_west_t:.1f} | "
             f"{r.nonoverlapping_t:.1f} (n={r.n_nonoverlapping}) | {r.fraction_positive:.0%} |"
         )
+    stress = ((frame.index >= "2008-09-01") & (frame.index <= "2009-03-31")) | (
+        (frame.index >= "2020-02-01") & (frame.index <= "2020-04-30")
+    )
+    calm = summarize_premium(frame.loc[~stress, "variance_premium"])
+    lines.append(
+        f"| Variance premium excluding Sep 2008 to Mar 2009 and Feb to Apr 2020 "
+        f"({int(stress.sum())} days dropped) | {10_000.0 * calm.mean:.2f} | "
+        f"{calm.newey_west_t:.1f} | {calm.nonoverlapping_t:.1f} "
+        f"(n={calm.n_nonoverlapping}) | {calm.fraction_positive:.0%} |"
+    )
     worst = frame["vol_premium"].idxmin()
     lines.append(
         f"\nMean VIX {100 * frame['iv'].mean():.1f}, mean realized {100 * frame['rv'].mean():.1f}. "
@@ -413,6 +428,86 @@ def vrp() -> None:
     plt.close(fig)
 
 
+def heston() -> None:
+    chain = load_chain(sorted(SNAPSHOT_DIR.glob("spy_*.json"))[-1])
+    slices, labels = [], []
+    for target in (0.06, 0.11, 0.19, 0.35, 0.65):
+        expiry = min(
+            (e for e in chain.expiries if e.maturity >= 0.04),
+            key=lambda e: abs(e.maturity - target),
+        )
+        fwd = implied_forward(expiry, chain.spot, rate=chain.rate)
+        k, vols = otm_smile(expiry, fwd)
+        sl = fit_svi(k, vols, expiry.maturity)
+        # Fit where the market is: from 3 and 2 standard deviations below and above ATM.
+        width = float(np.sqrt(svi_total_variance(np.array([0.0]), sl.params)[0]))
+        grid = np.linspace(max(k.min(), -3.0 * width), min(k.max(), 2.0 * width), 14)
+        slices.append(
+            (expiry.maturity, grid, np.sqrt(svi_total_variance(grid, sl.params) / expiry.maturity))
+        )
+        labels.append(expiry.expiry)
+
+    params, rmses = calibrate_heston(slices)
+    lines = [
+        f"### Heston fitted to the SPY smile ({chain.asof})\n",
+        "| v0 | kappa | theta | xi | rho | Feller ratio |\n|---|---|---|---|---|---|\n"
+        f"| {params.v0:.4f} | {params.kappa:.2f} | {params.theta:.4f} | {params.xi:.2f} | "
+        f"{params.rho:.2f} | {params.feller_ratio:.2f} |\n",
+        "| Expiry | Fit RMSE (vol pts) |\n|---|---|",
+    ]
+    lines += [f"| {d} | {100 * r:.2f} |" for d, r in zip(labels, rmses, strict=True)]
+    tables.append("\n".join(lines) + "\n")
+
+    spot = strike = 100.0
+    study = hedge_under_heston(
+        params, spot, strike, 0.25, chain.rate, n_rebalances=63, n_paths=4_000, seed=1
+    )
+    flat_std = study["black_scholes_flat"].std
+    names = {
+        "black_scholes_flat": "Black-Scholes delta, vol fixed at the call's implied vol",
+        "black_scholes_instantaneous": "Black-Scholes delta at the current instantaneous vol",
+        "heston": "Heston delta (derivative at fixed variance)",
+        "heston_min_variance": "Heston minimum-variance delta",
+    }
+    rows = [
+        "### Hedging a 3 month ATM call in the fitted Heston world\n",
+        "63 rebalances, 4,000 paths. The call is sold at its Heston price.\n",
+        "| Hedge | Mean P&L | Std of P&L | Std relative to flat Black-Scholes |",
+        "|---|---|---|---|",
+    ]
+    for key, label in names.items():
+        r = study[key]
+        rows.append(f"| {label} | {r.mean:+.3f} | {r.std:.3f} | {r.std / flat_std:.2f} |")
+    tables.append("\n".join(rows) + "\n")
+
+    fig, (a, b) = plt.subplots(1, 2, figsize=(11, 4))
+    for (maturity, grid, vols), label in zip(
+        (slices[0], slices[2], slices[4]), (labels[0], labels[2], labels[4]), strict=True
+    ):
+        line = a.plot(grid, 100 * vols, "o", ms=3, alpha=0.6)[0]
+        a.plot(
+            grid,
+            100 * heston_implied_vols(grid, maturity, params),
+            color=line.get_color(),
+            label=f"{label} (T={maturity:.2f})",
+        )
+    a.set(
+        xlabel="log-moneyness ln(K/F)",
+        ylabel="implied vol (%)",
+        title="Market smile (dots) and Heston fit (lines)",
+    )
+    a.legend(fontsize=8)
+    stds = [study[k].std for k in names]
+    b.bar(range(len(stds)), stds, color=["#999", "#999", "#4c78a8", "#f58518"])
+    b.set_xticks(
+        range(len(stds)), ["BS flat", "BS inst. vol", "Heston delta", "Heston min-var"], fontsize=8
+    )
+    b.set(ylabel="std of hedging P&L", title="Same paths, four hedges")
+    fig.tight_layout()
+    fig.savefig(FIGURES / "heston.png")
+    plt.close(fig)
+
+
 def american() -> None:
     lines = [
         "### American put, S=100, sigma=30%, r=5%, T=1 (LSM, 200k paths, 50 dates)\n",
@@ -434,7 +529,17 @@ def american() -> None:
 
 if __name__ == "__main__":
     FIGURES.mkdir(exist_ok=True)
-    for step in (convergence, variance_reduction, barrier, greeks, american, smile, hedging, vrp):
+    for step in (
+        convergence,
+        variance_reduction,
+        barrier,
+        greeks,
+        american,
+        smile,
+        hedging,
+        vrp,
+        heston,
+    ):
         print("running", step.__name__)
         step()
     body = "\n".join(tables)

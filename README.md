@@ -2,7 +2,19 @@
 
 [![CI](https://github.com/neelayyagar1/options-pricer/actions/workflows/ci.yml/badge.svg)](https://github.com/neelayyagar1/options-pricer/actions/workflows/ci.yml)
 
-A Python package for pricing options and for testing where the pricing model breaks on real market data. It prices options with the Black-Scholes-Merton closed form, Monte Carlo simulation and a binomial tree. The closed form is the reference, and the Monte Carlo engine is checked against it, so any disagreement shows up as a failing test instead of a plausible-looking number. The second half applies the model to a live option chain and to index history.
+A Python package that prices options three ways (Black-Scholes-Merton closed form, Monte Carlo, binomial tree) and then tests where the Black-Scholes model breaks on real market data, using one committed SPY option chain and daily VIX and S&P 500 history. The closed form is the reference and the Monte Carlo engine is checked against it, so any disagreement shows up as a failing test instead of a plausible-looking number.
+
+## Headline results
+
+- **Monte Carlo converges at the rate theory predicts.** Measured error slope against Black-Scholes is -0.51 for pseudo-random draws (theory: -0.5), and -1.05 for Sobol on the one-dimensional vanilla problem.
+- **Control variates remove almost all the variance of an arithmetic Asian option.** About 1,400 times lower variance at equal path count, from a discrete geometric Asian closed form (correlation 0.9996).
+- **Black-Scholes cannot fit the SPY smile, and a stochastic volatility model can.** For the 3 week expiry the market implies about 29% volatility at 10% below the forward and about 12% at 7% above it, where Black-Scholes says one number. A Heston model with five parameters fits five expiries to 0.2 to 0.8 vol points. In that fitted world a minimum-variance Heston hedge cuts the standard deviation of hedging P&L by about 17% against a flat Black-Scholes delta.
+- **The VIX sits above the volatility that followed it on 84% of days since 2005.** The average gap is 3.5 vol points (Newey-West t = 8.7). The variance version is much weaker (t = 2.3), because two crisis episodes drive it.
+
+<p align="center">
+  <img src="figures/convergence.png" width="49%" alt="Monte Carlo convergence">
+  <img src="figures/smile.png" width="49%" alt="SPY smile and SVI fit">
+</p>
 
 What is covered:
 
@@ -12,7 +24,8 @@ What is covered:
 - Variance reduction (antithetic variates, control variates), with the reduction measured
 - Greeks from the simulation two ways (finite difference and pathwise), compared with the analytic values
 - Implied forward and implied volatility from a real SPY option chain, and an SVI fit of the smile with no-arbitrage checks
-- A delta-hedging simulator that shows what the constant-volatility assumption costs when you actually hedge
+- Heston stochastic volatility: semi-analytic pricing, simulation, and calibration to the SPY smile
+- Delta-hedging simulations, first with flat volatility and then in a Heston world fitted to the smile
 - A variance risk premium study (VIX against realized S&P 500 volatility) and a walk-forward realized volatility forecast
 
 Everything is seeded, the market data is committed as snapshots, and the figures below regenerate offline with `python examples/run_all.py`.
@@ -75,9 +88,21 @@ The fit is non-convex, so it uses several starting points. Two static no-arbitra
 
 **Delta hedging.** Sell an option at implied vol $\sigma_i$ and hedge discretely while the stock moves with realized vol $\sigma_r$. Hedging with the delta at implied vol gives a random P&L whose continuous-time form is
 
-$$\text{P\&L} = \int_0^T e^{r(T-t)}\,\tfrac{1}{2} S_t^2\,\Gamma_t\,\left(\sigma_i^2 - \sigma_r^2\right) dt$$
+$$\text{PnL} = \int_0^T e^{r(T-t)}\,\tfrac{1}{2} S_t^2\,\Gamma_t\,\left(\sigma_i^2 - \sigma_r^2\right) dt$$
 
-with $\Gamma$ evaluated at implied vol. Hedging with delta at realized vol gives a deterministic total, $\left(\text{BS}(\sigma_i) - \text{BS}(\sigma_r)\right)e^{rT}$, but a bumpy path. With a finite number of rebalances there is also hedging error whose standard deviation falls like $n^{-1/2}$. The tests check the integral formula path by path.
+with $\Gamma$ evaluated at implied vol. Hedging with delta at realized vol gives a deterministic total, $\left(\text{BS}(\sigma_i) - \text{BS}(\sigma_r)\right)e^{rT}$, but a bumpy path. With a finite number of rebalances there is also hedging error whose standard deviation falls like $n^{-1/2}$. The tests check that the simulated P&L tracks this integral path by path.
+
+**Heston.** Variance is random and mean reverting, with correlation $\rho$ to the stock (negative for equities, which makes the smile skew):
+
+$$dS = (r - q) S\,dt + \sqrt{v}\,S\,dW_1, \qquad dv = \kappa(\theta - v)\,dt + \xi\sqrt{v}\,dW_2, \qquad d\langle W_1, W_2 \rangle = \rho\,dt$$
+
+Calls are priced from the characteristic function with Lewis' single-integral formula, in the "little trap" form that avoids branch cuts. The integration range has to be long when vol of vol is large, because the integrand decays slowly and the tail is only damped by $1/u^2$. The parameters are calibrated to the SVI-fitted smiles by minimizing implied volatility error, not price error, since far out of the money a tiny price error is a large vol error. Simulation is full truncation Euler, which stays stable when the Feller condition fails (it does here). The pricer is checked against Black-Scholes in the small vol-of-vol limit and against the simulator.
+
+For hedging in this world, the plain model delta $\partial C / \partial S$ holds variance fixed. Variance actually moves with the stock, so the share count that minimizes the variance of the hedged position is
+
+$$\Delta_{mv} = \frac{\partial C}{\partial S} + \frac{\rho\,\xi}{S}\,\frac{\partial C}{\partial v}$$
+
+The study compares four hedges on the same paths. The two Heston hedges use the simulated variance, which a real hedger cannot observe, so they show what perfect knowledge of the state buys, not what is achievable.
 
 **Variance risk premium.** The VIX is the market's 30 day implied variance. At each date it is compared with the realized variance over the following 21 trading days. Windows overlap, so ordinary standard errors would be far too small. The study reports Newey-West errors, and a second estimate using only non-overlapping windows. The VIX is variance-swap-like and includes the whole skew, so it is not an at-the-money Black-Scholes volatility. Both the volatility premium (VIX minus realized) and the variance premium (squared) are reported, since both appear in the literature.
 
@@ -101,15 +126,19 @@ The geometric control variate removes almost all the variance of the arithmetic 
 
 ![SPY smile](figures/smile.png)
 
-The smile is the main place the model is wrong. Black-Scholes says every strike should have the same implied vol, a flat line. The market puts a steep skew on equity index options: out-of-the-money puts are priced at much higher vols than calls, and the skew is steepest at short expiries. The SVI fits match the quotes to about 0.1 vol points on most expiries, and the fitted surface passes both no-arbitrage checks. Two expiries fit worse and are shown in the table. The snapshot is SPY, which has American-style options, so parity is only approximate, and the quotes are Friday's close. Only the forward is taken from parity. The implied dividend yield it would give drifts with maturity, which I read as a sign of the American early-exercise premium and quote timing, so it is not used.
+The smile is the main place the model is wrong. Black-Scholes says every strike should have the same implied vol, a flat line. The market puts a steep skew on equity index options: out-of-the-money puts are priced at much higher vols than calls, and the skew is steepest at short expiries. The SVI fits match the quotes to about 0.1 vol points on most expiries, and the fitted slices pass both no-arbitrage checks over the sampled moneyness range. Two expiries fit worse and are shown in the table. The snapshot is SPY, which has American-style options, so parity is only approximate, and the quotes are Friday's close. Only the forward is taken from parity. The implied dividend yield it would give drifts with maturity, which I read as a sign of the American early-exercise premium and quote timing, so it is not used.
 
 ![Hedging](figures/hedging.png)
 
 Hedging at the volatility you sold at leaves a random P&L, and hedging at the volatility that actually happens makes the total nearly certain. Both have the same average here. The right panel is the cost of discrete hedging: the spread of the error shrinks as $n^{-1/2}$, so it never reaches zero.
 
+![Heston fit and hedging](figures/heston.png)
+
+A single set of five Heston parameters reproduces the SPY smile across expiries from 3 weeks to 8 months. It fits worst at the shortest expiry (0.76 vol points), where the smile curves most sharply. The fitted Feller ratio is 0.22, so variance can touch zero, which is typical for equity fits. In the hedging comparison the minimum-variance delta is best. The plain Heston delta is the worst of the four, which looks wrong but is not: it ignores that variance falls when the stock rises (rho is -0.72), and Black-Scholes at a fixed implied vol happens to absorb part of that effect.
+
 ![Variance risk premium](figures/vrp.png)
 
-The volatility premium is large and statistically clear: the VIX sits above subsequently realized volatility on about 84% of days. The variance premium is much weaker once overlap is handled, because the average is pulled down by a few crises where realized volatility far exceeded the VIX. That is the point of the premium: it pays for carrying that tail, and it is not a free edge. The forecast gap table is a negative result. The difference between the VIX and the model forecast does not pick out days with a larger premium. The model improves the forecast of realized volatility on log RMSE, but the VIX is better on QLIKE, which punishes under-forecasts during spikes more heavily.
+The volatility premium is large and statistically clear: the VIX sits above subsequently realized volatility on about 84% of days. The variance premium is much weaker once overlap is handled, because the average is pulled down by a few crises where realized volatility far exceeded the VIX. Leaving out the stress periods of September 2008 to March 2009 and February to April 2020 (208 of 5,466 days) lifts the variance premium t-statistic from 2.3 to 9.6, so those episodes account for the weakness. The exclusion is there to diagnose, not to report a better number. That is the point of the premium: it pays for carrying that tail, and it is not a free edge. The forecast gap table is a negative result. The difference between the VIX and the model forecast does not pick out days with a larger premium. The model improves the forecast of realized volatility on log RMSE, but the VIX is better on QLIKE, which punishes under-forecasts during spikes more heavily.
 
 <!-- results:start -->
 
@@ -127,8 +156,8 @@ The volatility premium is large and statistically clear: the VIX sits above subs
 | Vanilla call | plain | 8.9920 | 0.02167 | 1.0x | 1.0x |
 | Vanilla call | antithetic | 9.0041 | 0.01631 | 1.8x | 2.9x |
 | Arithmetic Asian call | plain | 5.1653 | 0.01211 | 1.0x | 1.0x |
-| Arithmetic Asian call | antithetic | 5.1568 | 0.00894 | 1.8x | 1.6x |
-| Arithmetic Asian call | control variate (geometric) | 5.1695 | 0.00032 | 1398.5x | 1229.4x |
+| Arithmetic Asian call | antithetic | 5.1568 | 0.00894 | 1.8x | 1.5x |
+| Arithmetic Asian call | control variate (geometric) | 5.1695 | 0.00032 | 1398.5x | 1261.6x |
 
 Pilot correlation between arithmetic and geometric Asian: 0.9996
 
@@ -184,7 +213,7 @@ Pilot correlation between arithmetic and geometric Asian: 0.9996
 | 2027-09-17 | 0.901 | 75 | 0.09 | 0.449 | 6.3 |
 | 2027-09-30 | 0.937 | 139 | 0.09 | 0.454 | 6.0 |
 
-Calendar arbitrage violations between adjacent slices: 0
+Calendar arbitrage violations between adjacent slices: 0. The skew column evaluates SVI at k = -0.10 and +0.10, which is extrapolation on the shortest expiries where the quotes do not reach that far.
 
 #### Delta hedging a short ATM call
 
@@ -205,6 +234,7 @@ Realized vol is measured over the 21 trading days after each date.
 |---|---|---|---|---|
 | Volatility premium (VIX - RV, vol points) | 3.47 | 8.7 | 7.5 (n=261) | 84% |
 | Variance premium (VIX^2 - RV^2, vol points squared) | 76.43 | 2.3 | 1.7 (n=261) | 84% |
+| Variance premium excluding Sep 2008 to Mar 2009 and Feb to Apr 2020 (208 days dropped) | 115.90 | 9.6 | 7.5 (n=251) | 85% |
 
 Mean VIX 19.1, mean realized 15.6. Date with the most negative premium (a seller's worst case): 2020-02-20 (-72.0 vol points).
 
@@ -230,11 +260,38 @@ Out of sample 2008-02-06 to 2026-09-24, scikit-learn ridge with an expanding win
 
 Correlation between the gap and the realized premium: -0.058.
 
+#### Heston fitted to the SPY smile (2026-10-23)
+
+| v0 | kappa | theta | xi | rho | Feller ratio |
+|---|---|---|---|---|---|
+| 0.0282 | 7.29 | 0.0439 | 1.72 | -0.72 | 0.22 |
+
+| Expiry | Fit RMSE (vol pts) |
+|---|---|
+| 2026-11-13 | 0.76 |
+| 2026-12-04 | 0.61 |
+| 2026-12-31 | 0.45 |
+| 2027-02-26 | 0.33 |
+| 2027-06-17 | 0.21 |
+
+#### Hedging a 3 month ATM call in the fitted Heston world
+
+63 rebalances, 4,000 paths. The call is sold at its Heston price.
+
+| Hedge | Mean P&L | Std of P&L | Std relative to flat Black-Scholes |
+|---|---|---|---|
+| Black-Scholes delta, vol fixed at the call's implied vol | -0.000 | 1.727 | 1.00 |
+| Black-Scholes delta at the current instantaneous vol | +0.021 | 1.835 | 1.06 |
+| Heston delta (derivative at fixed variance) | +0.002 | 2.070 | 1.20 |
+| Heston minimum-variance delta | -0.001 | 1.434 | 0.83 |
+
 <!-- results:end -->
 
 ## Assumptions and limitations
 
-- **Constant volatility.** The smile above shows this is the main way the model is wrong. The delta-hedging results are sensitive to it too.
+- **Constant volatility.** The smile above shows this is the main way Black-Scholes is wrong. Heston relaxes it, but it is one model fitted to one day of one underlying, and it fits the shortest expiry least well.
+- **The Heston hedges see the variance.** The simulated variance is not observable in practice, so those hedges are an upper bound on what the model offers.
+- **Heston simulation is Euler.** It has a small discretization bias, visible as a slight positive offset against the characteristic-function price.
 - **Lognormal returns, no jumps.** Crashes are much more likely in real markets than the model allows.
 - **Continuous trading, no transaction costs.** The hedging argument needs continuous rebalancing, and real hedging has costs that the simulator does not include.
 - **Constant rate and continuous dividend yield.** Real dividends are discrete, and rates have a term structure. The market data layer uses one T-bill rate for all expiries.
@@ -293,7 +350,8 @@ src/pricer/
   forward.py             implied forward from put-call parity
   implied_vol.py         implied vol solver and smile extraction
   surface.py             SVI fit and arbitrage checks
-  hedging.py             delta-hedging simulator
+  heston.py              Heston pricing, simulation, calibration
+  hedging.py             delta-hedging simulators (flat vol and Heston)
   vrp.py                 variance risk premium and inference
   forecast.py            walk-forward volatility forecast (scikit-learn)
   data/
@@ -323,16 +381,15 @@ The tests check properties as well as values:
 - implied vol round trips, rejection of arbitrage-violating prices, and recovery of a known smile from a synthetic chain
 - the free parity regression recovering the rate on clean quotes, and being unstable under noise
 - SVI recovery of known parameters, and detection of butterfly and calendar violations
-- the delta-hedging P&L matching the gamma integral path by path, deterministic P&L at realized vol, and the $n^{-1/2}$ error slope
-- Newey-West errors against brute force on overlapping data, and no overlap between train and test in the walk-forward split
+- the delta-hedging P&L tracking the gamma integral path by path, nearly deterministic P&L at realized vol, and the $n^{-1/2}$ error slope
+- the Heston pricer against Black-Scholes and against simulation, calibration recovering a known surface, and the minimum-variance hedge beating the others
+- Newey-West errors close to the naive ones on independent data and much larger on overlapping windows, and no overlap between train and test in the walk-forward split
 
 ## Roadmap
 
 - Refresh the smile on a trading day, and with `^SPX` (European) quotes
 - Fit SVI jointly across expiries with an arbitrage-free constraint
-- Hedge on the fitted surface instead of a flat volatility
 - Likelihood ratio Greeks, and an upper bound for American options
-- Heston stochastic volatility
 
 ## References
 
